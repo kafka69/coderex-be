@@ -9,9 +9,11 @@ const pokemonData = [];
 // get all pokemons from csv file
 async function loadPokemonData() {
   return new Promise((resolve) => {
+    const promises = [];
+
     fs.createReadStream(path.join(__dirname, "../assets/pokemons.csv"))
       .pipe(csv())
-      .on("data", async (row) => {
+      .on("data", (row) => {
         const pokemon = {
           id: parseInt(row.id),
           name: row.Name.toLowerCase(),
@@ -19,62 +21,76 @@ async function loadPokemonData() {
           url: `http://localhost:8000/images/${row.id}.png`,
         };
 
-        try {
-          // Fetch additional data for Pokémon
-          const pokemonResponse = await fetch(`https://pokeapi.co/api/v2/pokemon/${row.Name.toLowerCase()}`);
-          const pokemonDataApi = await pokemonResponse.json();
-          const height = parseFloat((pokemonDataApi.height * 0.1).toFixed(2));
-          const weight = parseFloat((pokemonDataApi.weight * 0.1).toFixed(2));
-          const abilities = pokemonDataApi.abilities.map((ability) => ability.ability.name);
+        const fetchData = async () => {
+          try {
+            // Fetch additional data for Pokémon
+            const pokemonResponse = await fetch(`https://pokeapi.co/api/v2/pokemon/${row.Name.toLowerCase()}`);
+            const pokemonDataApi = await pokemonResponse.json();
+            const height = parseFloat((pokemonDataApi.height * 0.1).toFixed(2));
+            const weight = parseFloat((pokemonDataApi.weight * 0.1).toFixed(2));
+            const abilities = pokemonDataApi.abilities.map((ability) => ability.ability.name);
 
-          // Fetch species data (for flavor text)
-          const speciesResponse = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${row.Name.toLowerCase()}`);
-          const speciesData = await speciesResponse.json();
-          const flavorText = speciesData.flavor_text_entries.find((entry) => entry.language.name === "en")?.flavor_text;
-          const cleanedFlavorText = flavorText ? flavorText.replace(/[\n\r\f]/g, " ") : "No data available";
+            // Fetch species data (for flavor text)
+            const speciesResponse = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${row.Name.toLowerCase()}`);
+            const speciesData = await speciesResponse.json();
+            const flavorText = speciesData.flavor_text_entries.find((entry) => entry.language.name === "en")?.flavor_text;
+            const cleanedFlavorText = flavorText ? flavorText.replace(/[\n\r\f]/g, " ") : "No data available";
 
-          pokemon.height = height;
-          pokemon.weight = weight;
-          pokemon.abilities = abilities;
-          pokemon.description = cleanedFlavorText;
-          pokemon.category = "unknown";
-        } catch (error) {
-          // Fallback values if API call fails
-          pokemon.height = parseFloat((Math.random() * 10).toFixed(2));
-          pokemon.weight = parseFloat((Math.random() * 100).toFixed(2));
-          pokemon.abilities = [];
-          pokemon.description = "No data available";
-          pokemon.category = "unknown";
-        }
+            pokemon.height = height;
+            pokemon.weight = weight;
+            pokemon.abilities = abilities;
+            pokemon.description = cleanedFlavorText;
+            pokemon.category = "unknown";
 
-        pokemonData.push(pokemon);
+            pokemonData.push(pokemon);
+          } catch (error) {
+            // Values if API call fails
+            pokemon.height = parseFloat((Math.random() * 10).toFixed(2));
+            pokemon.weight = parseFloat((Math.random() * 100).toFixed(2));
+            pokemon.abilities = [];
+            pokemon.description = "No data available";
+            pokemon.category = "unknown";
+
+            pokemonData.push(pokemon);
+          }
+        };
+        // Add the promise for each data fetching operation
+        promises.push(fetchData());
       })
-      .on("end", () => {
-        // pokemonData.sort((a, b) => a.id - b.id);
+      .on("end", async () => {
+        // Wait for all promises to resolve
+        await Promise.all(promises);
+        
+        // Sort by id
+        pokemonData.sort((a, b) => a.id - b.id);
         isDataLoaded = true;
         resolve();
         console.log("CSV file successfully processed and data loaded.");
       });
   });
 }
-
+async function sortPokemonData(){
+  return new Promise((resolve) => {
+    pokemonData.sort((a, b) => a.id - b.id);
+    resolve();
+  })
+}
 // Initialize Pokémon data before setting up routes
 loadPokemonData();
-
+sortPokemonData();
 // get all pokemons
 router.get("/", (req, res, next) => {
   try {
     // Get query parameters for pagination, search, and type
-    const { page = 1, limit = 10, search, type } = req.query;
+    const { page = 1, limit = 10, search = "", type = "" } = req.query;
 
     // Convert page and limit to numbers
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
 
-    // Filter Pokémon data by search and type if provided
+    // Filter Pokemon data by search and type if provided
     const typeLower = type ? type.toLowerCase() : null;
     const nameLower = search ? search.toLowerCase() : null;
-
     const filteredPokemons = pokemonData.filter((pokemon) => {
       const matchesType = typeLower
         ? pokemon.types.map((t) => t.toLowerCase()).includes(typeLower)
@@ -82,15 +98,15 @@ router.get("/", (req, res, next) => {
       const matchesName = nameLower ? pokemon.name.includes(nameLower) : true;
       return matchesType && matchesName;
     });
-
+    
     // Calculate the total number of Pokémon
     const totalPokemons = filteredPokemons.length;
 
     // Apply pagination
     const startIndex = (pageNum - 1) * limitNum;
     const paginatedPokemons = filteredPokemons.slice(startIndex, startIndex + limitNum);
-
-    // Return the response with the paginated data
+    console.log(filteredPokemons.length);
+    // return data
     res.json({
       data: paginatedPokemons.map((pokemon) => ({
         id: pokemon.id,
